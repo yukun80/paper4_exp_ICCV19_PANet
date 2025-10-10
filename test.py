@@ -1,23 +1,26 @@
-"""Evaluation Script"""
+"""
+Evaluation Script
+
+python test.py with mode=test \
+snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/3/snapshots/30000.pth \
+episode_specs_path=datasplits/exp_val_support_query.json
+"""
 import os
 import shutil
 
-import tqdm
 import numpy as np
 import torch
-import torch.optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.backends.cudnn as cudnn
-from torchvision.transforms import Compose
+import tqdm
 
 from models.fewshot import FewShotSeg
-from dataloaders.customized import voc_fewshot, coco_fewshot
-from dataloaders.transforms import ToTensorNormalize
-from dataloaders.transforms import Resize, DilateScribble
+from dataloaders.exp_disaster_fewshot import exp_disaster_fewshot
 from util.metric import Metric
-from util.utils import set_seed, CLASS_LABELS, get_bbox
+from util.utils import set_seed
 from config import ex
+from util.episode_utils import episode_specs_from_split, episode_specs_from_dicts
 
 
 @ex.automain
@@ -39,25 +42,15 @@ def main(_run, _config, _log):
     model = FewShotSeg(pretrained_path=_config['path']['init_path'], cfg=_config['model'])
     model = nn.DataParallel(model.cuda(), device_ids=[_config['gpu_id'],])
     if not _config['notrain']:
+        if not _config['snapshot']:
+            raise ValueError('Please provide a snapshot path when notrain is False.')
         model.load_state_dict(torch.load(_config['snapshot'], map_location='cpu'))
     model.eval()
 
 
     _log.info('###### Prepare data ######')
-    data_name = _config['dataset']
-    if data_name == 'VOC':
-        make_data = voc_fewshot
-        max_label = 20
-    elif data_name == 'COCO':
-        make_data = coco_fewshot
-        max_label = 80
-    else:
-        raise ValueError('Wrong config for dataset!')
-    labels = CLASS_LABELS[data_name]['all'] - CLASS_LABELS[data_name][_config['label_sets']]
-    transforms = [Resize(size=_config['input_size'])]
-    if _config['scribble_dilation'] > 0:
-        transforms.append(DilateScribble(size=_config['scribble_dilation']))
-    transforms = Compose(transforms)
+    label_list = sorted(_config['exp_disaster']['test']['allowed_classes'])
+    max_label = max(_config['exp_disaster']['test']['class_remap'].values())
 
 
     _log.info('###### Testing begins ######')
@@ -67,57 +60,55 @@ def main(_run, _config, _log):
             _log.info(f'### Run {run + 1} ###')
             set_seed(_config['seed'] + run)
 
-            _log.info(f'### Load data ###')
-            dataset = make_data(
-                base_dir=_config['path'][data_name]['data_dir'],
-                split=_config['path'][data_name]['data_split'],
-                transforms=transforms,
-                to_tensor=ToTensorNormalize(),
-                labels=labels,
-                max_iters=_config['n_steps'] * _config['batch_size'],
+            _log.info('### Load data ###')
+            dataset_kwargs = dict(
+                images_dir=_config['path']['ExpDisaster']['meta_test_images'],
+                labels_dir=_config['path']['ExpDisaster']['meta_test_labels'],
+                class_remap=_config['exp_disaster']['test']['class_remap'],
                 n_ways=_config['task']['n_ways'],
                 n_shots=_config['task']['n_shots'],
-                n_queries=_config['task']['n_queries']
+                n_queries=_config['task']['n_queries'],
+                max_iters=_config['n_steps'] * _config['batch_size'],
+                ignore_label=_config['ignore_label'],
+                allowed_classes=_config['exp_disaster']['test']['allowed_classes'],
+                seed=_config['seed'] + run,
             )
-            if _config['dataset'] == 'COCO':
-                coco_cls_ids = dataset.datasets[0].dataset.coco.getCatIds()
+
+            split_path = _config.get('episode_specs_path') or ''
+            if split_path:
+                episode_specs = episode_specs_from_split(
+                    split_path,
+                    n_ways=_config['task']['n_ways'],
+                    n_shots=_config['task']['n_shots'],
+                    n_queries=_config['task']['n_queries'],
+                )
+                dataset_kwargs['episode_specs'] = episode_specs
+                dataset_kwargs['max_iters'] = len(episode_specs)
+            elif _config.get('episode_specs'):
+                episode_specs = episode_specs_from_dicts(_config['episode_specs'])
+                dataset_kwargs['episode_specs'] = episode_specs
+                dataset_kwargs['max_iters'] = len(episode_specs)
+
+            dataset = exp_disaster_fewshot(**dataset_kwargs)
             testloader = DataLoader(dataset, batch_size=_config['batch_size'], shuffle=False,
                                     num_workers=1, pin_memory=True, drop_last=False)
-            _log.info(f"Total # of Data: {len(dataset)}")
-
+            _log.info(f"Total # of Episodes: {len(dataset)}")
 
             for sample_batched in tqdm.tqdm(testloader):
-                if _config['dataset'] == 'COCO':
-                    label_ids = [coco_cls_ids.index(x) + 1 for x in sample_batched['class_ids']]
-                else:
-                    label_ids = list(sample_batched['class_ids'])
+                label_ids = list(sample_batched['class_ids'])
                 support_images = [[shot.cuda() for shot in way]
                                   for way in sample_batched['support_images']]
-                suffix = 'scribble' if _config['scribble'] else 'mask'
-
-                if _config['bbox']:
-                    support_fg_mask = []
-                    support_bg_mask = []
-                    for i, way in enumerate(sample_batched['support_mask']):
-                        fg_masks = []
-                        bg_masks = []
-                        for j, shot in enumerate(way):
-                            fg_mask, bg_mask = get_bbox(shot['fg_mask'],
-                                                        sample_batched['support_inst'][i][j])
-                            fg_masks.append(fg_mask.float().cuda())
-                            bg_masks.append(bg_mask.float().cuda())
-                        support_fg_mask.append(fg_masks)
-                        support_bg_mask.append(bg_masks)
-                else:
-                    support_fg_mask = [[shot[f'fg_{suffix}'].float().cuda() for shot in way]
-                                       for way in sample_batched['support_mask']]
-                    support_bg_mask = [[shot[f'bg_{suffix}'].float().cuda() for shot in way]
-                                       for way in sample_batched['support_mask']]
+                support_fg_mask = [[shot['fg_mask'].float().cuda() for shot in way]
+                                   for way in sample_batched['support_mask']]
+                support_bg_mask = [[shot['bg_mask'].float().cuda() for shot in way]
+                                   for way in sample_batched['support_mask']]
 
                 query_images = [query_image.cuda()
                                 for query_image in sample_batched['query_images']]
                 query_labels = torch.cat(
-                    [query_label.cuda()for query_label in sample_batched['query_labels']], dim=0)
+                    [query_label.cuda() for query_label in sample_batched['query_labels']], dim=0)
+                if query_labels.dim() == 4 and query_labels.size(1) == 1:
+                    query_labels = query_labels.squeeze(1)
 
                 query_pred, _ = model(support_images, support_fg_mask, support_bg_mask,
                                       query_images)
@@ -126,7 +117,7 @@ def main(_run, _config, _log):
                               np.array(query_labels[0].cpu()),
                               labels=label_ids, n_run=run)
 
-            classIoU, meanIoU = metric.get_mIoU(labels=sorted(labels), n_run=run)
+            classIoU, meanIoU = metric.get_mIoU(labels=label_list, n_run=run)
             classIoU_binary, meanIoU_binary = metric.get_mIoU_binary(n_run=run)
 
             _run.log_scalar('classIoU', classIoU.tolist())
@@ -138,7 +129,7 @@ def main(_run, _config, _log):
             _log.info(f'classIoU_binary: {classIoU_binary}')
             _log.info(f'meanIoU_binary: {meanIoU_binary}')
 
-    classIoU, classIoU_std, meanIoU, meanIoU_std = metric.get_mIoU(labels=sorted(labels))
+    classIoU, classIoU_std, meanIoU, meanIoU_std = metric.get_mIoU(labels=label_list)
     classIoU_binary, classIoU_std_binary, meanIoU_binary, meanIoU_std_binary = metric.get_mIoU_binary()
 
     _log.info('----- Final Result -----')
