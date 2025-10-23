@@ -5,7 +5,7 @@ Prediction visualization script for few-shot segmentation.
 Example:
 python predict.py with mode=predict \
 snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/3/snapshots/30000.pth \
-episode_specs_path=datasplits/exp_val_support_query.json 
+episode_specs_path=datasplits/disaster_1shot_splits.json 
 """
 
 from __future__ import annotations
@@ -154,6 +154,8 @@ def main(_run, _config, _log):
             n_ways=_config["task"]["n_ways"],
             n_shots=_config["task"]["n_shots"],
             n_queries=_config["task"]["n_queries"],
+            class_remap=_config["exp_disaster"]["test"]["class_remap"],
+            ignore_label=_config["ignore_label"],
         )
     elif _config.get("episode_specs"):
         episode_specs = episode_specs_from_dicts(_config["episode_specs"])
@@ -187,6 +189,10 @@ def main(_run, _config, _log):
     )
 
     inverse_remap = _inverse_remap(_config["exp_disaster"]["test"]["class_remap"])
+    foreground_classes = dataset.foreground_classes
+    if not foreground_classes:
+        raise RuntimeError("No foreground classes available for prediction episodes.")
+    max_label = max([0, *foreground_classes])
     visual_dir = _resolve_visual_dir(_config, _run, visualize_cfg)
     run_root = Path(_run.observers[0].dir) if _run.observers else visual_dir
     tif_dir = visual_dir / "tif_res"
@@ -195,8 +201,7 @@ def main(_run, _config, _log):
     tif_dir.mkdir(parents=True, exist_ok=True)
     png_dir.mkdir(parents=True, exist_ok=True)
     json_dir.mkdir(parents=True, exist_ok=True)
-    remap_values = list(_config["exp_disaster"]["test"]["class_remap"].values())
-    num_palette_classes = int(max(remap_values)) + 1 if remap_values else (_config["task"]["n_ways"] + 1)
+    num_palette_classes = max_label + 1
     palette = build_palette(num_palette_classes, visualize_cfg.get("colormap", "default"))
     alpha = float(visualize_cfg.get("alpha", 0.6))
     overlay_mode = visualize_cfg.get("overlay_mode", "blend")

@@ -36,19 +36,20 @@ python train.py with mode=train \
 
 ### 3. Generate Deterministic Episode JSON (Optional)
 ```
-python script/generate_exp_disaster_split.py \
-    --images ../_datasets/Exp_Disaster_Few-Shot/valset/images \
-    --labels ../_datasets/Exp_Disaster_Few-Shot/valset/labels \
-    --output datasplits/exp_val_support_query.json
+python script/generate_disaster_splits.py \
+    --path ../_datasets/Exp_Disaster_Few-Shot \
+    --shots 1
 ```
-- Produces a structured list of `{"class_ids": [...], "support": {...}, "query": [...]}` entries.
-- Can be edited manually for custom support/query pairings.
+- Produces `datasplits/disaster_1shot_splits.json` with:
+  - `support: {images: [...], labels: [...]}`
+  - `query:   {images: [...], labels: [...]}`
+- The parser infers per-class membership from labels using `exp_disaster.test.class_remap`.
 
 ### 4. Evaluate on Validation Episodes
 ```
 python test.py with mode=test \
     snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/<run>/snapshots/30000.pth \
-    episode_specs_path=datasplits/exp_val_support_query.json \
+    episode_specs_path=datasplits/disaster_1shot_splits.json \
     gpu_id=0
 ```
 - `test.py` runs `n_runs` repetitions, logs per-class IoU, binary IoU, means and stds to Sacred.
@@ -58,7 +59,7 @@ python test.py with mode=test \
 ```
 python predict.py with mode=predict \
     snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/<run>/snapshots/30000.pth \
-    episode_specs_path=datasplits/exp_val_support_query.json \
+    episode_specs_path=datasplits/disaster_1shot_splits.json \
     visualize.subdir=PANet_ExpDisaster_align_1way_1shot_[predict]
 ```
 - Uses `visualize.colormap="exp_disaster_binary"` and `visualize.overlay_mode="mask"` by default to render PNG masks (black background, landslide red, flood blue).

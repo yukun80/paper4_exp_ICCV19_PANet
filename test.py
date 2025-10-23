@@ -2,8 +2,10 @@
 Evaluation Script
 
 python test.py with mode=test \
-snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/3/snapshots/30000.pth \
-episode_specs_path=datasplits/exp_val_support_query.json
+snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/4/snapshots/30000.pth \
+episode_specs_path=datasplits/disaster_1shot_splits.json
+
+python test.py with mode=test snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/4/snapshots/30000.pth
 """
 import os
 import shutil
@@ -49,12 +51,15 @@ def main(_run, _config, _log):
 
 
     _log.info('###### Prepare data ######')
-    label_list = sorted(_config['exp_disaster']['test']['allowed_classes'])
-    max_label = max(_config['exp_disaster']['test']['class_remap'].values())
+    class_remap = _config['exp_disaster']['test']['class_remap']
+    remap_values = [value for value in class_remap.values() if value not in {_config['ignore_label']}]
+    remap_values.append(0)
+    max_label = max(remap_values)
 
 
     _log.info('###### Testing begins ######')
     metric = Metric(max_label=max_label, n_runs=_config['n_runs'])
+    label_list = []
     with torch.no_grad():
         for run in range(_config['n_runs']):
             _log.info(f'### Run {run + 1} ###')
@@ -81,6 +86,8 @@ def main(_run, _config, _log):
                     n_ways=_config['task']['n_ways'],
                     n_shots=_config['task']['n_shots'],
                     n_queries=_config['task']['n_queries'],
+                    class_remap=_config['exp_disaster']['test']['class_remap'],
+                    ignore_label=_config['ignore_label'],
                 )
                 dataset_kwargs['episode_specs'] = episode_specs
                 dataset_kwargs['max_iters'] = len(episode_specs)
@@ -93,6 +100,12 @@ def main(_run, _config, _log):
             testloader = DataLoader(dataset, batch_size=_config['batch_size'], shuffle=False,
                                     num_workers=1, pin_memory=True, drop_last=False)
             _log.info(f"Total # of Episodes: {len(dataset)}")
+            label_list = dataset.foreground_classes
+            if not label_list:
+                raise RuntimeError(
+                    "No foreground classes available in constructed episodes; "
+                    "check class_remap/allowed_classes configuration."
+                )
 
             for sample_batched in tqdm.tqdm(testloader):
                 label_ids = list(sample_batched['class_ids'])

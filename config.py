@@ -3,6 +3,7 @@
 import glob
 import itertools
 import os
+from typing import List
 
 import sacred
 from sacred import Experiment
@@ -53,10 +54,18 @@ def cfg():
             "allowed_classes": [1, 2, 3, 4, 5, 6, 7, 8],
         },
         "test": {
-            "class_remap": {0: 0, 20: 1, 30: 2},
-            "allowed_classes": [1, 2],
+            "class_remap": {0: 0, 20: 1},
         },
     }
+    test_remap_values = sorted(set(exp_disaster["test"]["class_remap"].values()))
+    allowed_classes: List[int] = []
+    for value in test_remap_values:
+        if value == 0:
+            continue
+        if isinstance(ignore_label, int) and value == ignore_label:
+            continue
+        allowed_classes.append(value)
+    exp_disaster["test"]["allowed_classes"] = allowed_classes
 
     if mode == "train":
         n_steps = 30000

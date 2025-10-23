@@ -80,6 +80,7 @@ class ExpDisasterFewShotDataset(Dataset):
             self.stem_to_index,
             self.index_to_classes,
         ) = self._index_dataset(allowed_classes)
+        self._episode_foreground_classes: List[int] = []
 
         if not self.samples:
             raise RuntimeError(
@@ -96,6 +97,7 @@ class ExpDisasterFewShotDataset(Dataset):
                     "No eligible foreground classes remain after indexing the dataset."
                 )
             self.episode_classes = available_classes
+            self._episode_foreground_classes = list(available_classes)
         else:
             missing = [
                 spec for spec in self.episode_specs
@@ -106,6 +108,11 @@ class ExpDisasterFewShotDataset(Dataset):
                     "Episode specs reference classes that are not available in the dataset: "
                     f"{missing}"
                 )
+            spec_classes = sorted({cid for spec in self.episode_specs for cid in spec.class_ids})
+            if not spec_classes:
+                raise ValueError("Episode specs must reference at least one foreground class.")
+            self.episode_classes = spec_classes
+            self._episode_foreground_classes = list(spec_classes)
 
     # ------------------------------------------------------------------
     # Dataset interface
@@ -119,6 +126,12 @@ class ExpDisasterFewShotDataset(Dataset):
             spec = self.episode_specs[index]
             return self._build_episode_from_spec(spec)
         return self._build_random_episode()
+
+    @property
+    def foreground_classes(self) -> List[int]:
+        """Return the ordered list of remapped foreground classes used in episodes."""
+
+        return list(self._episode_foreground_classes)
 
     # ------------------------------------------------------------------
     # Episode builders
