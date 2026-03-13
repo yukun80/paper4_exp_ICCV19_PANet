@@ -1,14 +1,10 @@
-"""
-Fewshot Semantic Segmentation
-"""
-
-from collections import OrderedDict
+"""Fewshot Semantic Segmentation."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .vgg import Encoder
+from .backbones import build_backbone
 
 
 class FewShotSeg(nn.Module):
@@ -26,11 +22,9 @@ class FewShotSeg(nn.Module):
     def __init__(self, in_channels=3, pretrained_path=None, cfg=None):
         super().__init__()
         self.pretrained_path = pretrained_path
-        self.config = cfg or {'align': False}
+        self.config = cfg or {"align": False, "backbone": "vgg", "freeze_backbone": False}
 
-        # Encoder
-        self.encoder = nn.Sequential(OrderedDict([
-            ('backbone', Encoder(in_channels, self.pretrained_path)),]))
+        self.encoder = build_backbone(self.config, pretrained_path=self.pretrained_path, in_channels=in_channels)
 
 
     def forward(self, supp_imgs, fore_mask, back_mask, qry_imgs):

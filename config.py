@@ -17,6 +17,7 @@ ex = Experiment("PANet")
 ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 source_folders = [".", "./dataloaders", "./models", "./util", "./script"]
+source_folders.append("./models/backbones")
 sources_to_save = list(itertools.chain.from_iterable([glob.glob(f"{folder}/*.py") for folder in source_folders]))
 for source_file in sources_to_save:
     ex.add_source_file(source_file)
@@ -33,13 +34,19 @@ def cfg():
     episode_specs_path = ""
     episode_specs = None
 
-    model = {"align": True}
+    model = {
+        "align": True,
+        "backbone": "vgg",
+        "freeze_backbone": False,
+        "dinov3": {"out_index": -1},
+    }
     task = {"n_ways": 1, "n_shots": 1, "n_queries": 1}
     ignore_label = 255
 
     path = {
         "log_dir": "./runs",
         "init_path": "./pretrained_model/vgg16-397923af.pth",
+        "dinov3_init_path": "./pretrained_model/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth",
         "ExpDisaster": {
             "meta_train_images": "../_datasets/Exp_Disaster_Few-Shot/trainset/images",
             "meta_train_labels": "../_datasets/Exp_Disaster_Few-Shot/trainset/labels",
@@ -104,7 +111,9 @@ def cfg():
         raise ValueError('Unsupported "mode" provided.')
 
     exp_components = ["ExpDisaster"]
-    exp_components.extend([key for key, value in model.items() if value])
+    exp_components.append(model["backbone"])
+    if model.get("align"):
+        exp_components.append("align")
     exp_components.append(f"{task['n_ways']}way_{task['n_shots']}shot_[{mode}]")
     exp_str = "_".join(exp_components)
 

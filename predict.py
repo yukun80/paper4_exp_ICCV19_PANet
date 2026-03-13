@@ -4,6 +4,7 @@ Prediction visualization script for few-shot segmentation.
 
 Example:
 python predict.py with mode=predict \
+task.n_shots=5 task.n_queries=1 \
 snapshot=runs/PANet_ExpDisaster_align_1way_1shot_[train]/3/snapshots/30000.pth \
 episode_specs_path=datasplits/disaster_1shot_splits.json 
 """
@@ -130,7 +131,7 @@ def main(_run, _config, _log):
     torch.set_num_threads(1)
 
     _log.info("###### Create model ######")
-    model = FewShotSeg(pretrained_path=_config["path"]["init_path"], cfg=_config["model"])
+    model = FewShotSeg(pretrained_path=_config["path"], cfg=_config["model"])
     model = nn.DataParallel(
         model.cuda(),
         device_ids=[

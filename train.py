@@ -2,6 +2,25 @@
 Training Script
 
 python train.py with mode=train
+
+python train.py with mode=train dataset=ExpDisaster model.backbone=dinov3_vitb16 model.freeze_backbone=True gpu_id=0
+
+python train.py with \
+mode=train \
+model.backbone=dinov3_vitb16 \
+model.freeze_backbone=False \
+task.n_ways=1 \
+task.n_shots=5 \
+task.n_queries=1 \
+gpu_id=0
+
+python train.py with \
+mode=train \
+model.backbone=vgg \
+task.n_ways=1 \
+task.n_shots=5 \
+task.n_queries=1 \
+gpu_id=0
 """
 
 import os
@@ -36,13 +55,17 @@ def main(_run, _config, _log):
     torch.set_num_threads(1)
 
     _log.info("###### Create model ######")
-    model = FewShotSeg(pretrained_path=_config["path"]["init_path"], cfg=_config["model"])
+    model = FewShotSeg(pretrained_path=_config["path"], cfg=_config["model"])
     model = nn.DataParallel(
         model.cuda(),
         device_ids=[
             _config["gpu_id"],
         ],
     )
+    if not any(parameter.requires_grad for parameter in model.parameters()):
+        raise RuntimeError(
+            "Model has no trainable parameters. Set model.freeze_backbone=False or add a trainable head."
+        )
     model.train()
 
     _log.info("###### Load data ######")
